@@ -97,13 +97,25 @@ func InitDevicesWithConfig(config *Config) error {
 	if kunlunDevice != nil {
 		device.DevicesMap[kunlunDevice.CommonWord()] = kunlunDevice
 	}*/
-	hygonDevice := hygon.InitDCUDevice(config.HygonConfig)
-	if hygonDevice != nil {
-		device.DevicesMap[hygonDevice.CommonWord()] = hygonDevice
+	// Only activate hygon/nvidia when their config section is actually present.
+	// Without this guard InitNvidiaDevice/InitDCUDevice always return non-nil, so
+	// mounting a shared device-config (or running on a node that already has a
+	// real device-plugin) would spin up a conflicting mock for that vendor.
+	if config.HygonConfig.ResourceCountName != "" {
+		hygonDevice := hygon.InitDCUDevice(config.HygonConfig)
+		if hygonDevice != nil {
+			device.DevicesMap[hygonDevice.CommonWord()] = hygonDevice
+		}
 	}
-	nvidiaDevice := nvidia.InitNvidiaDevice(config.NvidiaConfig)
-	if nvidiaDevice != nil {
-		device.DevicesMap[nvidiaDevice.CommonWord()] = nvidiaDevice
+	if config.NvidiaConfig.ResourceCountName != "" {
+		nvidiaDevice := nvidia.InitNvidiaDevice(config.NvidiaConfig)
+		if nvidiaDevice != nil {
+			device.DevicesMap[nvidiaDevice.CommonWord()] = nvidiaDevice
+		}
+	}
+	mthreadsDevice := mthreads.InitMthreadsDevice(config.MthreadsConfig)
+	if mthreadsDevice != nil {
+		device.DevicesMap[mthreadsDevice.CommonWord()] = mthreadsDevice
 	}
 	return nil
 }

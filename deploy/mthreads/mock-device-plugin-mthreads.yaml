@@ -1,0 +1,110 @@
+# Mock device-plugin for Moore Threads (摩尔线程) GPUs.
+#
+# Deploys a DaemonSet that fakes MTT S4000 (48GB) cards on any node labeled
+#   rise.io/device-plugin-mthreads-gpu-hami=true
+# by advertising the three Moore Threads extended resources
+#   mthreads.com/vgpu, mthreads.com/sgpu-memory, mthreads.com/sgpu-core
+# so that the HAMi scheduler and vast discover the cards and console-ui shows them.
+#
+# This is a DEMO/onboarding mock: Allocate is a no-op, there is no real device.
+# Namespace/SA/labels follow the CAMP convention (other device-plugins live in
+# rise-vast-system and are selected by rise.io/device-plugin-<vendor>-<device>-<scheduler>).
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mock-device-plugin-mthreads
+  namespace: rise-vast-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mock-device-plugin-mthreads
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mock-device-plugin-mthreads
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: mock-device-plugin-mthreads
+subjects:
+  - kind: ServiceAccount
+    name: mock-device-plugin-mthreads
+    namespace: rise-vast-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mock-device-plugin-mthreads-config
+  namespace: rise-vast-system
+data:
+  # Only the mthreads section is present, so the empty-config guards in
+  # config.go keep every other vendor (nvidia/hygon/...) inactive — the mock
+  # never double-reports the real NVIDIA cards that may live on the same node.
+  device-config.yaml: |
+    mthreads:
+      resourceCountName: "mthreads.com/vgpu"
+      resourceMemoryName: "mthreads.com/sgpu-memory"
+      resourceCoreName: "mthreads.com/sgpu-core"
+      # Mock knobs: 4 x MTT S4000, each 48GiB (96 * 512MiB) / 16 sgpu-core units.
+      deviceCount: 4
+      deviceMemoryUnit: 96
+      deviceCoreUnit: 16
+      deviceType: "MTT S4000"
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: mock-device-plugin-mthreads
+  namespace: rise-vast-system
+  labels:
+    app.kubernetes.io/name: mock-device-plugin
+    app.kubernetes.io/component: mock-device-plugin-mthreads
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: mock-device-plugin-mthreads
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mock-device-plugin
+        app.kubernetes.io/component: mock-device-plugin-mthreads
+    spec:
+      serviceAccountName: mock-device-plugin-mthreads
+      # Only run where a Moore Threads card is (pretended to be) present.
+      nodeSelector:
+        rise.io/device-plugin-mthreads-gpu-hami: "true"
+      # Tolerate GPU-node taints so the mock lands on dedicated device nodes.
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: mock-dp
+          image: quanzhenglong.com/camp/mock-device-plugin:latest # replaced at deploy time
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          command:
+            - ./k8s-device-plugin
+            - -v=5
+            - --device-config-file=/device-config.yaml
+          volumeMounts:
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: device-config
+              mountPath: /device-config.yaml
+              subPath: device-config.yaml
+      volumes:
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+        - name: device-config
+          configMap:
+            name: mock-device-plugin-mthreads-config
