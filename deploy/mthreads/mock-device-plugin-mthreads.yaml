@@ -77,15 +77,21 @@ spec:
         app.kubernetes.io/component: mock-device-plugin-mthreads
     spec:
       serviceAccountName: mock-device-plugin-mthreads
-      # Only run where a Moore Threads card is (pretended to be) present.
+      # Pin to the demo node by hostname. NOTE: do NOT select on
+      # rise.io/device-plugin-mthreads-gpu-hami — that label is owned/reconciled
+      # by the vast NodeConfig controller (derived from manufacturerSpec) and
+      # would be stripped, evicting this pod. Hostname is stable and vast-neutral.
       nodeSelector:
-        rise.io/device-plugin-mthreads-gpu-hami: "true"
+        kubernetes.io/hostname: hw-4090d-50
       # Tolerate GPU-node taints so the mock lands on dedicated device nodes.
       tolerations:
         - operator: Exists
       containers:
         - name: mock-dp
-          image: quanzhenglong.com/camp/mock-device-plugin:latest # replaced at deploy time
+          image: quanzhenglong.com/camp/mock-device-plugin:mthreads-7fa3dab
+          # Image is side-loaded into the node's containerd (registry push needs
+          # CI robot creds), so never try to pull it.
+          imagePullPolicy: IfNotPresent
           env:
             - name: NODE_NAME
               valueFrom:
